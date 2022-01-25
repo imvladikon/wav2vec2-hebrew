@@ -1,0 +1,12 @@
+datasets==1.13.3
+transformers==4.11.3
+huggingface_hub==0.1
+torch==1.10.1+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
+torchaudio==0.10.1+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
+audiomentations[extras]
+torch-audiomentations
+jiwer
+pydub
+pysubs2
+abydos
+pyctcdecode
