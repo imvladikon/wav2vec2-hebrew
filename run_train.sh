@@ -3,7 +3,7 @@ export CUDA_VISIBLE_DEVICES="0,1,2"
 python -m torch.distributed.launch --nproc_per_node=3 train.py \
 	--dataset_path="data/out" \
     --audio_column_name="wav_filename" \
-    --text_column_name="transcript" \
+    --text_column_name="sentence" \
 	--model_name_or_path="facebook/wav2vec2-xls-r-1b" \
 	--output_dir="./model" \
 	--overwrite_output_dir \
