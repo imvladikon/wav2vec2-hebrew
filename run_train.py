@@ -8,7 +8,7 @@ import re
 import sys
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import datasets
 import numpy as np
@@ -35,6 +35,26 @@ from transformers import (
     set_seed,
 )
 
+try:
+    from torch_audiomentations import (
+        Compose,
+        AddGaussianNoise,
+        AddGaussianSNR,
+        ClippingDistortion,
+        FrequencyMask,
+        Gain,
+        LoudnessNormalization,
+        Normalize,
+        PitchShift,
+        PolarityInversion,
+        Shift,
+        TimeMask,
+        TimeStretch,
+    )
+
+    AUDIOMENTATIONS_AVAILABLE = True
+except:
+    AUDIOMENTATIONS_AVAILABLE = False
 try:
     from transformers import AutoProcessor
 except:
@@ -252,10 +272,16 @@ class DataTrainingArguments:
                     "so that the cached datasets can consequently be loaded in distributed training"
         },
     )
-    do_print: bool = field(
+    print_samples: bool = field(
         default=False,
         metadata={
             "help": "Print row with validation inference results to stdout after each epoch"
+        },
+    )
+    use_augmentations: bool = field(
+        default=False,
+        metadata={
+            "help": "Use data augmentation during training"
         },
     )
     use_auth_token: str = field(
@@ -288,6 +314,39 @@ class DataTrainingArguments:
     )
 
 
+class Augmentator:
+
+    def __init__(
+            self,
+            apply_gaussian_noise_with_p=0.5,
+            apply_gain_with_p=0.5,
+            apply_pitch_shift_with_p=0.5,
+            apply_time_stretch_with_p=0.5,
+            augment_proba=0.5,
+            sample_rate=16_000
+    ):
+        self.augmentator_fn = None
+        self.sample_rate = sample_rate
+        self.augment_proba = augment_proba
+        if apply_gaussian_noise_with_p + apply_gain_with_p + apply_pitch_shift_with_p + apply_time_stretch_with_p > 0:
+            self.augmentator_fn = Compose([
+                TimeStretch(min_rate=0.8, max_rate=1.2, leave_length_unchanged=False,
+                            p=apply_time_stretch_with_p),
+                PitchShift(min_semitones=-1, max_semitones=1,
+                           p=apply_pitch_shift_with_p),
+                Gain(min_gain_in_db=-1, max_gain_in_db=1, p=apply_gain_with_p),
+                AddGaussianNoise(min_amplitude=0.0001, max_amplitude=0.001,
+                                 p=apply_gaussian_noise_with_p),
+            ])
+
+    def __call__(self, input_values: List[float], *args, **kwargs):
+        if self.augmentator_fn is not None:
+            return self.augmentator_fn(samples=np.array(input_values),
+                                       sample_rate=self.sample_rate).tolist()
+        else:
+            return input_values
+
+
 @dataclass
 class DataCollatorCTCWithPadding:
     """
@@ -318,6 +377,8 @@ class DataCollatorCTCWithPadding:
     padding: Union[bool, str] = "longest"
     pad_to_multiple_of: Optional[int] = None
     pad_to_multiple_of_labels: Optional[int] = None
+    augmentator_fn: Optional[Callable] = None
+    use_augmentations: bool = False
 
     def __call__(
             self, features: List[Dict[str, Union[List[int], torch.Tensor]]]
@@ -325,7 +386,11 @@ class DataCollatorCTCWithPadding:
         # split inputs and labels since they have to be of different lenghts and need
         # different padding methods
         input_features = [
-            {"input_values": feature["input_values"]} for feature in features
+            {
+                "input_values": self.augmentator_fn(feature["input_values"])
+                if self.use_augmentations
+                else feature["input_values"]}
+            for feature in features
         ]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
 
@@ -418,9 +483,10 @@ def speech_file_to_array_fn(batch, audio_column_name, dataset_path=""):
 
 class PrintSamplesPredictionCallback(TrainerCallback):
 
-    def __init__(self, processor):
+    def __init__(self, processor, eval_dataset):
         super(PrintSamplesPredictionCallback, self).__init__()
         self.processor = processor
+        self.eval_dataset = eval_dataset
 
     def on_log(
             self,
@@ -431,16 +497,22 @@ class PrintSamplesPredictionCallback(TrainerCallback):
             logs: Optional[Any] = None,
             **kwargs
     ):
+        """
+        :param args:
+        :param state:
+        :param control:
+        :param model:
+        :param logs:
+        :param kwargs: 'tokenizer', 'optimizer', 'lr_scheduler', 'train_dataloader', 'eval_dataloader'
+        :return:
+        """
         if state.is_local_process_zero:
-            pass
-            # input_dict = self.processor(common_voice_test_to_print[0]["input_values"],
-            #                             return_tensors="pt", padding=True)
-            # logits = model(input_dict.input_values.to("cuda")).logits
-            # pred_ids = torch.argmax(logits, dim=-1)[0]
-            # print("Prediction:")
-            # print(self.processor.decode(pred_ids))
-            # print("\nReference:")
-            # print(common_voice_test_to_print_sent[0]["sentence"].lower())
+            input_dict = self.processor(self.eval_dataset["input_values"],
+                                        return_tensors="pt", padding=True)
+            logits = model(input_dict.input_values.to(model.device)).logits
+            pred_ids = torch.argmax(logits, dim=-1)[0]
+            print(f"Prediction: {self.processor.decode(pred_ids)}")
+            print(f"\nReference: {self.eval_dataset['references'].lower()}")
 
 
 def main():
@@ -549,14 +621,6 @@ def main():
         if data_args.wav_filesize_column_name is not None:
             raw_datasets[train_split_name] = raw_datasets[train_split_name].sort(
                 data_args.wav_filesize_column_name, reverse=True)
-
-    if data_args.do_print:
-        raw_dataset_print = load_dataset(
-            data_args.dataset_name,
-            data_args.dataset_config_name,
-            split=ReadInstruction(data_args.eval_split_name, from_=10, to=20, unit='abs'),
-            use_auth_token=data_args.use_auth_token
-        )
 
     if training_args.do_eval:
         if raw_datasets[eval_split_name] is None:
@@ -794,7 +858,11 @@ def main():
         processor = Wav2Vec2Processor.from_pretrained(training_args.output_dir)
 
     # Instantiate custom data collator
-    data_collator = DataCollatorCTCWithPadding(processor=processor)
+    data_collator = DataCollatorCTCWithPadding(
+        processor=processor,
+        augmentator_fn=Augmentator(),
+        use_augmentations=data_args.use_augmentations
+    )
 
     decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
@@ -829,7 +897,13 @@ def main():
         eval_dataset=vectorized_datasets[
             eval_split_name] if training_args.do_eval else None,
         tokenizer=feature_extractor,
-        optimizers=optimizers
+        # optimizers=optimizers,
+        callbacks=[PrintSamplesPredictionCallback(
+            processor=processor,
+            eval_dataset={
+                **vectorized_datasets[eval_split_name][0],
+                "references": raw_datasets[eval_split_name][0][data_args.text_column_name],
+            })] if data_args.print_samples and training_args.do_eval else None,
     )
 
     # 8. Finally, we can start training
@@ -885,10 +959,10 @@ def main():
         else "na"
     )
     kwargs = {
-        "language": "ca",
+        "language": "he",
         "finetuned_from": model_args.model_name_or_path,
         "tasks": "speech-recognition",
-        "tags": ["automatic-speech-recognition"],
+        "tags": ["automatic-speech-recognition", "robust-speech-event", "he"],
         "dataset_args": f"Config: {config_name}, Training split: {data_args.train_split_name}, Eval split: {data_args.eval_split_name}",
     }
 
