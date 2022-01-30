@@ -318,11 +318,11 @@ class Augmentator:
 
     def __init__(
             self,
-            apply_gaussian_noise_with_p=0.5,
-            apply_gain_with_p=0.5,
-            apply_pitch_shift_with_p=0.5,
-            apply_time_stretch_with_p=0.5,
-            augment_proba=0.5,
+            apply_gaussian_noise_with_p=0.1,
+            apply_gain_with_p=0.1,
+            apply_pitch_shift_with_p=0.1,
+            apply_time_stretch_with_p=0.1,
+            augment_proba=0.1,
             sample_rate=16_000
     ):
         self.augmentator_fn = None
@@ -702,6 +702,9 @@ def main():
     # 5. Now we can instantiate the feature extractor, tokenizer and model
     # Note for distributed training, the .from_pretrained methods guarantee that only
     # one local process can concurrently download model & vocab.
+    with open(tokenizer_name_or_path, "r") as fin:
+        print("loading tokenizer")
+        print(fin.read())
 
     # load feature_extractor and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
@@ -878,14 +881,14 @@ def main():
             "weight_decay": 0.0,
         },
     ]
-    optimizers = None
+    trainer_kwargs = {}
     if BNB_AVAILABLE:
         optimizer = bnb.optim.Adam8bit(
             params=optimizer_grouped_parameters,
             betas=(training_args.adam_beta1, training_args.adam_beta2),
             eps=training_args.adam_epsilon,
         )
-        optimizers = (optimizer, None)
+        trainer_kwargs["optimizers"] = (optimizer, None)
 
     trainer = Trainer(
         model=model,
@@ -897,7 +900,7 @@ def main():
         eval_dataset=vectorized_datasets[
             eval_split_name] if training_args.do_eval else None,
         tokenizer=feature_extractor,
-        # optimizers=optimizers,
+        **trainer_kwargs,
         callbacks=[PrintSamplesPredictionCallback(
             processor=processor,
             eval_dataset={
