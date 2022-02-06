@@ -14,7 +14,8 @@ import datasets
 import numpy as np
 import torch
 import torchaudio
-from datasets import DatasetDict, ReadInstruction, load_dataset, load_metric
+from datasets import DatasetDict, ReadInstruction, load_dataset, load_metric, \
+    concatenate_datasets
 
 try:
     import bitsandbytes as bnb
@@ -22,6 +23,12 @@ try:
     BNB_AVAILABLE = True
 except:
     BNB_AVAILABLE = False
+try:
+    import wandb
+
+    WANDB_AVAILABLE = True
+except:
+    WANDB_AVAILABLE = False
 import transformers
 from transformers import (
     AutoConfig,
@@ -328,7 +335,13 @@ class Augmentator:
         self.augmentator_fn = None
         self.sample_rate = sample_rate
         self.augment_proba = augment_proba
-        if apply_gaussian_noise_with_p + apply_gain_with_p + apply_pitch_shift_with_p + apply_time_stretch_with_p > 0:
+        all_p = (
+                apply_gaussian_noise_with_p
+                + apply_gain_with_p
+                + apply_pitch_shift_with_p
+                + apply_time_stretch_with_p
+        )
+        if AUDIOMENTATIONS_AVAILABLE and all_p > 0:
             self.augmentator_fn = Compose([
                 TimeStretch(min_rate=0.8, max_rate=1.2, leave_length_unchanged=False,
                             p=apply_time_stretch_with_p),
@@ -340,7 +353,7 @@ class Augmentator:
             ])
 
     def __call__(self, input_values: List[float], *args, **kwargs):
-        if self.augmentator_fn is not None:
+        if AUDIOMENTATIONS_AVAILABLE and self.augmentator_fn is not None:
             return self.augmentator_fn(samples=np.array(input_values),
                                        sample_rate=self.sample_rate).tolist()
         else:
@@ -487,6 +500,7 @@ class PrintSamplesPredictionCallback(TrainerCallback):
         super(PrintSamplesPredictionCallback, self).__init__()
         self.processor = processor
         self.eval_dataset = eval_dataset
+        self.metric_fn = load_metric("wer")
 
     def on_log(
             self,
@@ -507,12 +521,31 @@ class PrintSamplesPredictionCallback(TrainerCallback):
         :return:
         """
         if state.is_local_process_zero:
-            input_dict = self.processor(self.eval_dataset["input_values"],
-                                        return_tensors="pt", padding=True)
-            logits = model(input_dict.input_values.to(model.device)).logits
-            pred_ids = torch.argmax(logits, dim=-1)[0]
-            print(f"Prediction: {self.processor.decode(pred_ids)}")
-            print(f"\nReference: {self.eval_dataset['references'].lower()}")
+            columns = ["id", "prediction", "reference", "audio", "wer"]
+            data = []
+            for idx, row in enumerate(self.eval_dataset):
+                input_dict = self.processor(row["input_values"],
+                                            return_tensors="pt", padding=True)
+                logits = model(input_dict.input_values.to(model.device)).logits
+                pred_ids = torch.argmax(logits, dim=-1)[0]
+                prediction = self.processor.decode(pred_ids)
+                print(f"Prediction: {prediction}")
+                reference = row['references'].lower()
+                print(f"\nReference: {reference}")
+
+                if WANDB_AVAILABLE:
+                    audio, sample_rate = tuple(row["audio"].values())
+                    audio = wandb.Audio(np.squeeze(audio),
+                                        sample_rate=sample_rate)
+                    wer = self.metric_fn.compute(
+                        predictions=[prediction],
+                        references=[reference],
+                    )
+
+                    data.append([idx, prediction, reference, audio, wer])
+            if WANDB_AVAILABLE:
+                table = wandb.Table(data=data, columns=columns)
+                wandb.run.log({"audio_predictions": table})
 
 
 def main():
@@ -660,49 +693,11 @@ def main():
     # make sure all processes wait until vocab is created
     tokenizer_name_or_path = model_args.tokenizer_name_or_path
     tokenizer_kwargs = {}
-    if tokenizer_name_or_path is None:
-        # save vocab in training output dir
-        tokenizer_name_or_path = training_args.output_dir
-
-        vocab_file = os.path.join(tokenizer_name_or_path, "vocab.json")
-
-        with training_args.main_process_first():
-            if training_args.overwrite_output_dir and os.path.isfile(vocab_file):
-                os.remove(vocab_file)
-
-        with training_args.main_process_first(desc="dataset map vocabulary creation"):
-            print("creating vocab")
-            if not os.path.isfile(vocab_file):
-                os.makedirs(tokenizer_name_or_path, exist_ok=True)
-                vocab_dict = create_vocabulary_from_data(
-                    raw_datasets,
-                    word_delimiter_token=word_delimiter_token,
-                    unk_token=unk_token,
-                    pad_token=pad_token,
-                    train_split_name=train_split_name,
-                    text_column_name=data_args.text_column_name,
-                )
-
-                # save vocab dict to be loaded into tokenizer
-                with open(vocab_file, "w") as file:
-                    json.dump(vocab_dict, file)
-
-        # if tokenizer has just been created
-        # it is defined by `tokenizer_class` if present in config else by `model_type`
-        tokenizer_kwargs = {
-            "config": config if config.tokenizer_class is not None else None,
-            "tokenizer_type": config.model_type
-            if config.tokenizer_class is None
-            else None,
-            "unk_token": unk_token,
-            "pad_token": pad_token,
-            "word_delimiter_token": word_delimiter_token,
-        }
 
     # 5. Now we can instantiate the feature extractor, tokenizer and model
     # Note for distributed training, the .from_pretrained methods guarantee that only
     # one local process can concurrently download model & vocab.
-    with open(tokenizer_name_or_path, "r") as fin:
+    with open(os.path.join(tokenizer_name_or_path, "vocab.json"), "r") as fin:
         print("loading tokenizer")
         print(fin.read())
 
@@ -890,6 +885,14 @@ def main():
         )
         trainer_kwargs["optimizers"] = (optimizer, None)
 
+    samples_to_log = [
+        {
+            **vectorized_datasets[eval_split_name][i],
+            "references": raw_datasets[eval_split_name][i][data_args.text_column_name],
+            "audio": raw_datasets[eval_split_name][i][data_args.audio_column_name],
+        } for i in range(5)
+    ]
+
     trainer = Trainer(
         model=model,
         data_collator=data_collator,
@@ -903,10 +906,7 @@ def main():
         **trainer_kwargs,
         callbacks=[PrintSamplesPredictionCallback(
             processor=processor,
-            eval_dataset={
-                **vectorized_datasets[eval_split_name][0],
-                "references": raw_datasets[eval_split_name][0][data_args.text_column_name],
-            })] if data_args.print_samples and training_args.do_eval else None,
+            eval_dataset=samples_to_log)] if data_args.print_samples and training_args.do_eval else None,
     )
 
     # 8. Finally, we can start training

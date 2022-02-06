@@ -20,7 +20,7 @@ class HebrewSpeechRecognitionPipeline(AutomaticSpeechRecognitionPipeline):
     def __init__(
             self,
             pretrained_model_name_or_path: Optional[
-                Union[str, os.PathLike]] = "imvladikon/wav2vec2-large-xlsr-53-hebrew",
+                Union[str, os.PathLike]] = "imvladikon/wav2vec2-xls-r-300m-hebrew",
             *args,
             **kwargs,
     ):
@@ -41,7 +41,7 @@ class HebrewSpeechRecognitionPipeline(AutomaticSpeechRecognitionPipeline):
         self.model_name = pretrained_model_name_or_path
         self.processor = Wav2Vec2Processor.from_pretrained(self.model_name)
         self.metric_fn = None
-        self.postprocess_text_fn = lambda x: x.replace("[PAD]", "")
+        self.postprocess_text_fn = lambda x: x
 
     @torch.inference_mode()
     def __call__(self, file, labels=None, *args, **kwargs):
@@ -67,24 +67,7 @@ class HebrewSpeechRecognitionPipeline(AutomaticSpeechRecognitionPipeline):
 
 
 if __name__ == '__main__':
-    # asr = HebrewSpeechRecognitionPipeline()
-    # filename = "./samples/013b882862704b7792ce16cd944b98470.wav"
-    # output = asr(filename, labels="שלום תלמידים שמי עופרה והיום אנחנו נדבר על")
-    # print(output)
-    #
-    # asr = HebrewSpeechRecognitionPipeline()
-    filename = "./1.m4a"
-    AudioSegment.from_file(filename).export("./samples/1.wav", format="wav")
-    filename = "./samples/1.wav"
-    # output = asr(filename)
-    # print(output)
-    chunks = split_on_silence(
-        AudioSegment.from_file(filename),
-        # must be silent for at least half a second
-        min_silence_len=100,
-
-        # consider it silent if quieter than -16 dBFS
-        # silence_thresh=-16
-    )
-    for i, chunk in enumerate(chunks):
-        chunk.export(f"{i}.wav", format="wav")
+    asr = HebrewSpeechRecognitionPipeline()
+    filename = "./samples/013b882862704b7792ce16cd944b98470.wav"
+    output = asr(filename, labels="שלום תלמידים שמי עופרה והיום אנחנו נדבר על")
+    print(output)
