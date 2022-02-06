@@ -56,6 +56,7 @@ Large dataset:
 |---|---|---|---|
 |train|12.3| 90777  | 69  |
 |dev  |1.05|  20246 |  14* |
+
 (*weakly labeled data wasn't used in validation set)
 
 ## Results
