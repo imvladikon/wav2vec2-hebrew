@@ -11,6 +11,10 @@ A fine-tuned versions of [facebook/wav2vec2-xls-r-300m](https://huggingface.co/f
 * [imvladikon/wav2vec2-xls-r-300m-hebrew](https://huggingface.co/imvladikon/wav2vec2-xls-r-300m-hebrew)
 * [imvladikon/wav2vec2-xls-r-300m-lm-hebrew](https://huggingface.co/imvladikon/wav2vec2-xls-r-300m-lm-hebrew)
 
+## Wandb
+
+[wandb logs](https://wandb.ai/imvladikon/wav2vec2-hebrew?workspace=user-imvladikon)
+
 ## Usage
 
 ```python
