@@ -1,22 +1,60 @@
 
 # wav2vec2-xls-r-300m-hebrew
 
-This model is a fine-tuned version of [facebook/wav2vec2-xls-r-300m](https://huggingface.co/facebook/wav2vec2-xls-r-300m) on the private datasets in 2 stages - firstly was fine-tuned on a small dataset with good samples Then the obtained model was fine-tuned on a large dataset with the small good dataset, with various samples from different sources, and with an unlabeled dataset that was weakly labeled using a previously trained model.
+A fine-tuned versions of [facebook/wav2vec2-xls-r-300m](https://huggingface.co/facebook/wav2vec2-xls-r-300m) on the private datasets in 2 stages:
+* firstly was fine-tuned on a small dataset with good samples 
+* then the obtained model was fine-tuned on a large dataset with the small good dataset, with various samples from different sources, and with an unlabeled dataset that was weakly labeled using a previously trained model.
+
+
+## Weights
+
+* [imvladikon/wav2vec2-xls-r-300m-hebrew](https://huggingface.co/imvladikon/wav2vec2-xls-r-300m-hebrew)
+* [imvladikon/wav2vec2-xls-r-300m-lm-hebrew](https://huggingface.co/imvladikon/wav2vec2-xls-r-300m-lm-hebrew)
+
+## Usage
+
+```python
+from transformers import (
+    AutomaticSpeechRecognitionPipeline,
+    AutoFeatureExtractor,
+    Wav2Vec2ForCTC,
+    AutoTokenizer
+)
+
+pretrained_model_name_or_path = "imvladikon/wav2vec2-xls-r-300m-hebrew"
+asr = AutomaticSpeechRecognitionPipeline(
+    feature_extractor=AutoFeatureExtractor.from_pretrained(
+        pretrained_model_name_or_path
+    ),
+    model=Wav2Vec2ForCTC.from_pretrained(
+        pretrained_model_name_or_path
+    ),
+    tokenizer=AutoTokenizer.from_pretrained(
+        pretrained_model_name_or_path
+    ))
+filename = "audio.wav"
+print(asr(filename))
+```
+Chunking file into smaller chunks is not implemented yet. 
+
+## Datasets descriptions
 
 Small dataset:
 
-| split  |size(gb) | n_samples | duration(hrs)|   |
-|---|---|---|---|---|
-|train|4.19| 20306  | 28  |   |
-|dev  |1.05|  5076 |  7 |   |
+| split  |size(gb) | n_samples | duration(hrs)|  
+|---|---|---|---|
+|train|4.19| 20306  | 28 | 
+|dev  |1.05|  5076 |  7 |
 
 Large dataset: 
 
-| split  |size(gb) | n_samples | duration(hrs)|   |
-|---|---|---|---|---|
-|train|12.3| 90777  | 69  |   |
-|dev  |1.05|  20246 |  14* |   |
+| split  |size(gb) | n_samples | duration(hrs)|
+|---|---|---|---|
+|train|12.3| 90777  | 69  |
+|dev  |1.05|  20246 |  14* |
 (*weakly labeled data wasn't used in validation set)
+
+## Results
 
 After firts training it achieves:
 
@@ -35,17 +73,6 @@ on large dataset
 - Loss: 0.4502
 - WER: 0.2318
 
-## Model description
-
-More information needed
-
-## Intended uses & limitations
-
-More information needed
-
-## Training and evaluation data
-
-More information needed
 
 ## Training procedure
 
