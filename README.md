@@ -58,11 +58,14 @@ filename = "./samples/bereshit011.wav"
 text = "בראשית ברא אלוהים את השמיים ואת הארץ"
 aligner = HebrewWav2Vec2Aligner(input_sample_rate=16000, use_cuda=True)
 # aligning segments to text (sentences)
-segments = aligner.align_data(filename, text)[0]
+first_sentence = aligner.align_data(filename, text)[0]
+# {'sentence': 'בראשית ברא אלוהים את השמיים ואת הארץ', 
+#  'segments': [Segment(label='בראשית', start=6750.516853932584, end=18644.284644194755, score=0.16025335497152965)...]}
 
 # showing in IPython (notebook)
 waveform, sample_rate = torchaudio.load(filename)
-aligner.show_segments(waveform, segments)
+aligner.show_segments(waveform, first_sentence)
+# showing segments using IPython.display.Audio
 ```
 
 ## Training process
