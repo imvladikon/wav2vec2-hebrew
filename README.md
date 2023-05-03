@@ -40,7 +40,6 @@ pip install git+https://github.com/imvladikon/wav2vec2-hebrew
 #### Speech recognition
 
 ```python
-
 from wav2vec2_hebrew import HebrewSpeechRecognitionPipeline
 
 asr = HebrewSpeechRecognitionPipeline()

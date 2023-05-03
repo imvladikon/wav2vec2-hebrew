@@ -229,7 +229,7 @@ class HebrewWav2Vec2Aligner(Wav2Vec2Aligner):
     def __init__(self,
                  input_sample_rate: int,
                  use_cuda: bool,
-                 model_name: str = "imvladikon/wav2vec2-xlsr-300m-hebrew"):
+                 model_name: str = "imvladikon/wav2vec2-xls-r-300m-hebrew"):
         super().__init__(model_name=model_name,
                          input_sample_rate=input_sample_rate,
                          use_cuda=use_cuda)
