@@ -21,7 +21,7 @@ def read_requirements(reqs_path):
 
 
 setup(
-    name="news_scrapers",
+    name="wav2vec2_hebrew",
     version="0.0.1",
     description="Get link (URL) preview",
     long_description=open("README.md").read(),
