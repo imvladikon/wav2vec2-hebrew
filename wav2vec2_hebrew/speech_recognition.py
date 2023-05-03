@@ -5,7 +5,7 @@ from typing import Optional, Union
 
 from datasets import load_metric
 import torch
-from pydub.silence import split_on_silence
+
 from transformers import (
     AutoFeatureExtractor,
     Wav2Vec2ForCTC,
@@ -13,28 +13,24 @@ from transformers import (
     AutomaticSpeechRecognitionPipeline,
     AutoTokenizer,
 )
-from pydub import AudioSegment
 
 
 class HebrewSpeechRecognitionPipeline(AutomaticSpeechRecognitionPipeline):
-    def __init__(
-            self,
-            pretrained_model_name_or_path: Optional[
-                Union[str, os.PathLike]] = "imvladikon/wav2vec2-xls-r-300m-hebrew",
-            *args,
-            **kwargs,
-    ):
 
+    def __init__(
+        self,
+        pretrained_model_name_or_path: Optional[
+            Union[str, os.PathLike]
+        ] = "imvladikon/wav2vec2-xls-r-300m-hebrew",
+        *args,
+        **kwargs,
+    ):
         super().__init__(
             feature_extractor=AutoFeatureExtractor.from_pretrained(
                 pretrained_model_name_or_path
             ),
-            model=Wav2Vec2ForCTC.from_pretrained(
-                pretrained_model_name_or_path
-            ),
-            tokenizer=AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path
-            ),
+            model=Wav2Vec2ForCTC.from_pretrained(pretrained_model_name_or_path),
+            tokenizer=AutoTokenizer.from_pretrained(pretrained_model_name_or_path),
             *args,
             **kwargs,
         )
@@ -64,10 +60,3 @@ class HebrewSpeechRecognitionPipeline(AutomaticSpeechRecognitionPipeline):
                     references=[label],
                 )
         return results
-
-
-if __name__ == '__main__':
-    asr = HebrewSpeechRecognitionPipeline()
-    filename = "./samples/013b882862704b7792ce16cd944b98470.wav"
-    output = asr(filename, labels="שלום תלמידים שמי עופרה והיום אנחנו נדבר על")
-    print(output)
