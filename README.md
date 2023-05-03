@@ -43,9 +43,10 @@ pip install git+https://github.com/imvladikon/wav2vec2-hebrew
 from wav2vec2_hebrew import HebrewSpeechRecognitionPipeline
 
 asr = HebrewSpeechRecognitionPipeline()
-filename = "./samples/013b882862704b7792ce16cd944b98470.wav"
+filename = "./samples/bereshit011.wav"
 output = asr(filename)
 print(output)
+# [{'text': 'בראשית ברא אלוהים את השמייים ואת הארץ'}]
 ```
 
 #### Alignment
@@ -53,10 +54,10 @@ print(output)
 import torchaudio
 from wav2vec2_hebrew import HebrewWav2Vec2Aligner
 
-filename = "bereshit011.wav"
+filename = "./samples/bereshit011.wav"
 text = "בראשית ברא אלוהים את השמיים ואת הארץ"
 aligner = HebrewWav2Vec2Aligner(input_sample_rate=16000, use_cuda=True)
-# aligning segments to text
+# aligning segments to text (sentences)
 segments = aligner.align_data(filename, text)[0]
 
 # showing in IPython (notebook)

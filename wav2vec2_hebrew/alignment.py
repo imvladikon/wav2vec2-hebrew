@@ -147,9 +147,6 @@ class Wav2Vec2Aligner:
             end: int
             score: float
 
-            def __repr__(self):
-                return f"{self.label}\t{self.score:4.2f}\t{self.start * 20:5d}\t{self.end * 20:5d}"
-
             @property
             def length(self):
                 return self.end - self.start
@@ -203,6 +200,9 @@ class Wav2Vec2Aligner:
     def show_segments(self, audio, segments):
         import IPython
         from IPython.display import display
+
+        if isinstance(segments, dict):
+            segments = segments["segments"]
 
         for segment in segments:
             print(segment.label)
