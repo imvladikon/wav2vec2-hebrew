@@ -72,6 +72,10 @@ aligner.show_segments(waveform, first_sentence)
 
 Training logs and details are available in the [train](train) folder.
 
+### Datasets   
+
+* https://huggingface.co/datasets/imvladikon/hebrew_speech_kan   
+* https://huggingface.co/datasets/imvladikon/hebrew_speech_coursera   
 
 ### Weights
 
