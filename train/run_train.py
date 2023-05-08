@@ -1,34 +1,21 @@
 # !/usr/bin/env python
 # coding=utf-8
 import functools
-import json
 import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
 import os
-import re
 import sys
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import datasets
 import numpy as np
 import torch
 import torchaudio
-from datasets import DatasetDict, ReadInstruction, load_dataset, load_metric, \
-    concatenate_datasets
-
-try:
-    import bitsandbytes as bnb
-
-    BNB_AVAILABLE = True
-except:
-    BNB_AVAILABLE = False
-try:
-    import wandb
-
-    WANDB_AVAILABLE = True
-except:
-    WANDB_AVAILABLE = False
+from datasets import DatasetDict, load_dataset, load_metric
 import transformers
 from transformers import (
     AutoConfig,
@@ -41,6 +28,26 @@ from transformers import (
     Wav2Vec2Processor,
     set_seed,
 )
+from transformers.trainer_pt_utils import get_parameter_names
+from transformers.trainer_utils import get_last_checkpoint, is_main_process
+from transformers import AutoProcessor
+
+try:
+    import bitsandbytes as bnb
+
+    BNB_AVAILABLE = True
+except:
+    BNB_AVAILABLE = False
+    logger.warning(
+        "bitsandbytes is not installed, you will not be able to use it for training optimization.")
+try:
+    import wandb
+
+    WANDB_AVAILABLE = True
+except:
+    WANDB_AVAILABLE = False
+    logger.warning(
+        "wandb is not installed, you will not be able to log training progress.")
 
 try:
     from torch_audiomentations import (
@@ -62,24 +69,8 @@ try:
     AUDIOMENTATIONS_AVAILABLE = True
 except:
     AUDIOMENTATIONS_AVAILABLE = False
-try:
-    from transformers import AutoProcessor
-except:
-    pass
-from transformers.trainer_pt_utils import get_parameter_names
-from transformers.trainer_utils import get_last_checkpoint, is_main_process
-from transformers.utils import check_min_version
-from transformers.utils.versions import require_version
-
-# Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.16.0")
-
-require_version(
-    "datasets>=1.13.3",
-    "To fix: pip install -r examples/pytorch/text-classification/requirements.txt",
-)
-
-logger = logging.getLogger(__name__)
+    logger.warning(
+        "torch_audiomentations is not installed, you will not be able to use it for audio augmentations.")
 
 
 def list_field(default=None, metadata=None):
@@ -480,12 +471,15 @@ def create_vocabulary_from_data(
 
 
 def speech_file_to_array_fn(batch, audio_column_name, dataset_path=""):
-    if dataset_path:
+    if dataset_path and os.path.exists(dataset_path):
         dataset_path = os.path.join(dataset_path, batch[audio_column_name])
+    elif isinstance(batch[audio_column_name], str):
+        dataset_path = batch[audio_column_name]
     else:
-        dataset_path = batch[audio_column_name] if isinstance(batch[audio_column_name],
-                                                              str) else \
-            batch[audio_column_name]["path"]
+        dataset_path = batch[audio_column_name]["path"]
+        # https://huggingface.co/datasets/google/fleurs has a bit of a weird path
+        if not Path(dataset_path).exists() and "path" in batch:
+            dataset_path = str(Path(batch["path"]).parent / dataset_path)
     speech_array, sampling_rate = torchaudio.load(dataset_path)
     batch[audio_column_name] = {
         "array": speech_array[0].numpy(),
@@ -534,14 +528,17 @@ class PrintSamplesPredictionCallback(TrainerCallback):
                 print(f"\nReference: {reference}")
 
                 if WANDB_AVAILABLE:
-                    audio, sample_rate = tuple(row["audio"].values())
-                    audio = wandb.Audio(np.squeeze(audio),
-                                        sample_rate=sample_rate)
+                    audio = np.squeeze(row["audio"]["array"])
+                    sample_rate = 16000
+                    for sr_col in ["sampling_rate", "sample_rate", "rate"]:
+                        if sr_col in row["audio"]:
+                            sample_rate = row["audio"][sr_col]
+                            break
+                    audio = wandb.Audio(audio, sample_rate=sample_rate)
                     wer = self.metric_fn.compute(
                         predictions=[prediction],
                         references=[reference],
                     )
-
                     data.append([idx, prediction, reference, audio, wer])
             if WANDB_AVAILABLE:
                 table = wandb.Table(data=data, columns=columns)
@@ -759,18 +756,20 @@ def main():
     # `phoneme_language` is only relevant if the model is fine-tuned on phoneme classification
     phoneme_language = data_args.phoneme_language
 
-    raw_datasets[train_split_name] = raw_datasets[train_split_name].map(
-        speech_file_to_array_fn,
-        num_proc=num_workers,
-        fn_kwargs={"dataset_path": data_args.dataset_path,
-                   "audio_column_name": audio_column_name},
-    )
-    raw_datasets[eval_split_name] = raw_datasets[eval_split_name].map(
-        speech_file_to_array_fn,
-        num_proc=num_workers,
-        fn_kwargs={"dataset_path": data_args.dataset_path,
-                   "audio_column_name": audio_column_name},
-    )
+    if training_args.do_train:
+        raw_datasets[train_split_name] = raw_datasets[train_split_name].map(
+            speech_file_to_array_fn,
+            num_proc=num_workers,
+            fn_kwargs={"dataset_path": data_args.dataset_path,
+                       "audio_column_name": audio_column_name},
+        )
+    if training_args.do_eval:
+        raw_datasets[eval_split_name] = raw_datasets[eval_split_name].map(
+            speech_file_to_array_fn,
+            num_proc=num_workers,
+            fn_kwargs={"dataset_path": data_args.dataset_path,
+                       "audio_column_name": audio_column_name},
+        )
 
     # Preprocessing the datasets.
     # We need to read the audio files as arrays and tokenize the targets.
@@ -792,6 +791,12 @@ def main():
         return batch
 
     print(f"Vectorizing")
+
+    # TODO: workaround, sometimes happens for different options of the --do_train and --do_eval flags
+    if "train" in raw_datasets and raw_datasets["train"] is None:
+        raw_datasets.pop("train")
+    if "validation" in raw_datasets and raw_datasets["validation"] is None:
+        raw_datasets.pop("validation")
 
     with training_args.main_process_first(desc="dataset map preprocessing"):
         vectorized_datasets = raw_datasets.map(

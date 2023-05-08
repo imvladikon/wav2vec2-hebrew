@@ -21,3 +21,5 @@ torchaudio
 audiomentations[extras]
 torch-audiomentations
 bitsandbytes @ git+https://github.com/facebookresearch/bitsandbytes
+kenlm
+wandb
